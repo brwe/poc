@@ -84,11 +84,31 @@ public class BasicEsSparkTest implements Serializable {
     @Test
     public void movieReviews() throws Exception {
 
-        String target = "movie-reviews/review";
+        String target = "single_wiki_shard/page";
         JavaPairRDD<String, Map<String, Object>> esRDD = JavaEsSpark.esRDD(sc, target,
-                "{\"analyzed_text\": [" +
-                        "{\"field\":\"text\", \"idf_threshold\": 0.1, \"df_threshold\": 5}" +
-                        "],\"fields\": []}");
+                "{\n" +
+                        "  \"fields\": [], \n" +
+                        "  \"analyzed_text\": [\n" +
+                        "    {\n" +
+                        "      \"field\": \"text\",\n" +
+                        "      \"idf_threshold\": 1,\n" +
+                        "      \"df_threshold\": 10\n" +
+                        "    }\n" +
+                        "  ],\n" +
+                        "  \"min_score\": 0.5,\n" +
+                        "  \"query\": {\n" +
+                        "    \"function_score\": {\n" +
+                        "      \"functions\": [\n" +
+                        "        {\n" +
+                        "          \"script_score\": {\n" +
+                        "            \"script\": \"(doc['text.token_count'].value >20)? 1: 0\"\n" +
+                        "          }\n" +
+                        "        }\n" +
+                        "      ],\n" +
+                        "      \"boost_mode\": \"replace\"\n" +
+                        "    }\n" +
+                        "  }\n" +
+                        "}");
 
         // get the analyzed text from the results
         JavaRDD<Iterable<String>> corpus = esRDD.map(
