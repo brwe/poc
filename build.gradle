@@ -23,7 +23,7 @@ compileJava {
 	targetCompatibility = 1.7
 }
 
-ext.esVersion="1.4.2"
+ext.esVersion="1.5.2"
 ext.ehVersion="2.1.0.BUILD-SNAPSHOT"
 ext.scalaMajorVersion="2.10"
 ext.scalaVersion="2.10.4"
@@ -42,7 +42,7 @@ dependencies {
 	compile("org.apache.spark:spark-sql_$scalaMajorVersion:$sparkVersion")
 	compile("org.scala-lang:scala-library:$scalaVersion")
 	compile("org.apache.spark:spark-mllib_$scalaMajorVersion:$sparkVersion")
-
+	compile "org.codehaus.groovy:groovy-all:$groovyVersion"
 	
 	testCompile "junit:junit:$junitVersion"
 	testCompile "org.hamcrest:hamcrest-all:$hamcrestVersion"
