@@ -64,8 +64,6 @@ class MovieReviewsClassifier implements Serializable {
 
     private static transient JavaSparkContext sc = null;
 
-    Set<String> terms = new HashSet<>();
-
     /**
      * This needs token-plugin installed: https://github.com/brwe/es-token-plugin
      * <p/>
@@ -118,17 +116,8 @@ class MovieReviewsClassifier implements Serializable {
         // use significant terms to get a list of features
         // for example: "bad, worst, ridiculous" for class positive and "awesome, great, wonderful" for class positive
         System.out.println("Get descriptive terms for class positive and negative with significant terms aggregation");
-        // 940
-        for (int i = 990; i < 1500; i++) {
-            try {
-                System.out.println("so many terms: " + terms.size());
-                String[] featureTerms = getSignificantTermsAsStringList(i, new JLHScore.JLHScoreBuilder(), client);
-                testClassifiers(featureTerms, client);
-            } catch (Throwable t) {
-                System.out.println(t.getMessage());
-                return;
-            }
-        }
+        String[] featureTerms = getSignificantTermsAsStringList(990, new JLHScore.JLHScoreBuilder(), client);
+        testClassifiers(featureTerms, client);
     }
 
     private void testClassifiers(String[] featureTerms, Client client) {
@@ -148,26 +137,20 @@ class MovieReviewsClassifier implements Serializable {
         // try naive bayes
         System.out.println("train Naive Bayes ");
         final NaiveBayesModel model = NaiveBayes.train(training.rdd(), 1.0);
-        // System.out.println("labels : " + Arrays.toString(model.labels()));
-        //System.out.println("thetas : " + Arrays.deepToString(model.theta()));
-        //System.out.println("pi : " + Arrays.toString(model.pi()));
         evaluate(test, model);
 
         // index template search request that can be used for classification of new data
-        // client.preparePutIndexedScript("mustache", "naive_bayes_model", naiveBayesSearchTemplate(model, featureTerms)).get();
+        client.preparePutIndexedScript("mustache", "naive_bayes_model", naiveBayesSearchTemplate(model, featureTerms)).get();
         // slow version but with parameters built in
-        System.out.println("script string length: " + getNaiveBayesGroovyScript(model, featureTerms).length());
         client.preparePutIndexedScript("groovy", "naive_bayes_model", getNaiveBayesGroovyScript(model, featureTerms)).get();
 
-      /*  // try svm
+        // try svm
         System.out.println("train SVM ");
         final SVMModel svmModel = SVMWithSGD.train(training.rdd(), 10, 0.1, 0.01, 1);
-        //System.out.println("weights : " + Arrays.toString(svmModel.weights().toArray()));
-        //System.out.println("intercept : " + svmModel.intercept());
         evaluate(test, svmModel);
 
         // index template search request that can be used for classification of new data
-        client.preparePutIndexedScript("mustache", "svm_model", svmSearchTemplate(svmModel, featureTerms)).get();*/
+        client.preparePutIndexedScript("mustache", "svm_model", svmSearchTemplate(svmModel, featureTerms)).get();
     }
 
     private void evaluate(JavaRDD<LabeledPoint> test, final ClassificationModel model) {
@@ -213,7 +196,7 @@ class MovieReviewsClassifier implements Serializable {
                 }
         );
         // print some lines so we know how the data looks like
-        // System.out.println("example doucment vector: " + corpus.take(1));
+        System.out.println("example doucment vector: " + corpus.take(1));
         return corpus;
     }
 
@@ -246,21 +229,14 @@ class MovieReviewsClassifier implements Serializable {
         Collection<SignificantTerms.Bucket> significantTerms = ((SignificantStringTerms) (labelBucket.get(0).getAggregations().asMap().get("features"))).getBuckets();
         List<String> features = new ArrayList<>();
         addFeatures(significantTerms, features);
-        System.out.println("last feature for negative: " + features.get(features.size() - 1));
         significantTerms = ((SignificantStringTerms) (labelBucket.get(1).getAggregations().asMap().get("features"))).getBuckets();
         addFeatures(significantTerms, features);
-        System.out.println("last feature for positive: " + features.get(features.size() - 1));
         String[] featureTerms = features.toArray(new String[features.size()]);
-        //System.out.println("features: " + Arrays.toString(features.toArray()));
         return featureTerms;
     }
 
     private void addFeatures(Collection<SignificantTerms.Bucket> significantTerms, List<String> featureArray) {
-        boolean print = terms.size() > 0;
         for (SignificantTerms.Bucket bucket : significantTerms) {
-            if ((terms.add(bucket.getKey()) == true) && print) {
-                System.out.println("new term: " + bucket.getKey());
-            }
             featureArray.add("\"" + bucket.getKey() + "\"");
         }
     }
@@ -345,7 +321,6 @@ class MovieReviewsClassifier implements Serializable {
                 "import org.elasticsearch.search.lookup.IndexField;" +
                 "import org.elasticsearch.search.lookup.IndexFieldTerm;" +
                 "import org.apache.spark.mllib.linalg.Vectors;" +
-                "" +
                 "features = " + Arrays.toString(features).replace("\"", "\\\"") + ";" +
                 "double[] labels = " + Arrays.toString(model.labels()) + ";" +
                 "double[][] thetas = " + Arrays.deepToString(model.theta()) + ";" +
