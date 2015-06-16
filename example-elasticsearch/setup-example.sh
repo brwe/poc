@@ -31,6 +31,9 @@ currentpath=$(pwd)
 # enable dynamic scripting
 echo 'script.disable_dynamic: false' >> ../elasticsearch-1.5.2/config/elasticsearch.yml
 
+# set reloading of file scripts lower
+echo 'watcher.interval: "10s"' >> ../elasticsearch-1.5.2/config/elasticsearch.yml
+
 # start elasticsearch
 cd ..
 elasticsearch-1.5.2/bin/elasticsearch 

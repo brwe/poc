@@ -131,6 +131,8 @@ class MovieReviewsClassifier implements Serializable {
 
         // index template search request that can be used for classification of new data
         client.preparePutIndexedScript("mustache", "naive_bayes_model", naiveBayesSearchTemplate(model, featureTerms)).get();
+        // slow version but with parameters built in
+        client.preparePutIndexedScript("groovy", "naive_bayes_model", getNaiveBayesGroovyScript(model, featureTerms)).get();
 
         // try svm
         System.out.println("train SVM ");
@@ -303,5 +305,22 @@ class MovieReviewsClassifier implements Serializable {
                 "  ]\n" +
                 "  }\n" +
                 "}";
+    }
+    public String getNaiveBayesGroovyScript(NaiveBayesModel model, String[] features) {
+        return "import org.apache.spark.mllib.classification.NaiveBayesModel;\n" +
+                "import org.elasticsearch.search.lookup.IndexField;\n" +
+                "import org.elasticsearch.search.lookup.IndexFieldTerm;\n" +
+                "import org.apache.spark.mllib.linalg.Vectors;\n" +
+                "\n" +
+                "features = "+ Arrays.toString(features) +
+                "double[] labels = "+ Arrays.toString(model.labels()) +
+                "double[][] thetas = "+ Arrays.deepToString(model.theta()) +
+                "double[] pi = "+ Arrays.toString(model.pi()) +
+                "NaiveBayesModel model = new NaiveBayesModel(labels, pi, thetas);\n" +
+                "double[] tfs = new double[features.size()];\n" +
+                "for (int i = 0; i < features.size(); i++) {\n" +
+                "    tfs[i] = _index[field][features.get(i)].tf();\n" +
+                "}\n" +
+                "return model.predict(Vectors.dense(tfs));\n";
     }
 }

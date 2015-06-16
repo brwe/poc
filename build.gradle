@@ -29,7 +29,7 @@ ext.scalaMajorVersion="2.10"
 ext.scalaVersion="2.10.4"
 ext.sparkVersion="1.2.0"
 ext.log4jVersion="1.2.17"
-ext.groovyVersion="2.3.2"
+ext.groovyVersion="2.4.0"
 ext.junitVersion="4.11"
 ext.hamcrestVersion="1.3"
 
