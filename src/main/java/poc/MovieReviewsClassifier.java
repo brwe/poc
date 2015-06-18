@@ -99,17 +99,19 @@ class MovieReviewsClassifier implements Serializable {
         // use significant terms to get a list of features
         // for example: "bad, worst, ridiculous" for class positive and "awesome, great, wonderful" for class positive
         System.out.println("Get descriptive terms for class positive and negative with significant terms aggregation");
-        String[] featureTerms = getSignificantTermsAsStringList(990, new JLHScore.JLHScoreBuilder(), client);
-        testClassifiers(featureTerms, client);
+        String[] featureTerms = getSignificantTermsAsStringList(990, new JLHScore.JLHScoreBuilder(), client, "sentiment140", "polarity");
+        trainClassifiersAndWriteModels(featureTerms, client, "sentiment140/tweets", "_tweets", "polarity");
+        featureTerms = getSignificantTermsAsStringList(990, new JLHScore.JLHScoreBuilder(), client, "movie-reviews", "label");
+        trainClassifiersAndWriteModels(featureTerms, client, "movie-reviews/review", "_movies", "label");
     }
 
-    private void testClassifiers(String[] featureTerms, Client client) {
+    private void trainClassifiersAndWriteModels(String[] featureTerms, Client client, String indexAndType, String modelSuffix, String labelFieldName) {
         // get for each document a vector of tfs for the featureTerms
-        JavaPairRDD<String, Map<String, Object>> esRDD = JavaEsSpark.esRDD(sc, "movie-reviews/review",
-                restRequestBody(featureTerms));
+        JavaPairRDD<String, Map<String, Object>> esRDD = JavaEsSpark.esRDD(sc, indexAndType,
+                restRequestBody(featureTerms, labelFieldName));
 
         // convert to labeled point (label + vector)
-        JavaRDD<LabeledPoint> corpus = convertToLabeledPoint(esRDD);
+        JavaRDD<LabeledPoint> corpus = convertToLabeledPoint(esRDD, labelFieldName);
 
         // Split data into training (60%) and test (40%).
         // from https://spark.apache.org/docs/1.2.1/mllib-naive-bayes.html
@@ -123,9 +125,9 @@ class MovieReviewsClassifier implements Serializable {
         evaluate(test, model);
 
         // index template search request that can be used for classification of new data
-        client.preparePutIndexedScript("mustache", "naive_bayes_model", naiveBayesSearchTemplate(model, featureTerms)).get();
+        client.preparePutIndexedScript("mustache", "naive_bayes_model" + modelSuffix, naiveBayesSearchTemplate(model, featureTerms)).get();
         // slow version but with parameters built in
-        client.preparePutIndexedScript("groovy", "naive_bayes_model", getNaiveBayesGroovyScript(model, featureTerms)).get();
+        client.preparePutIndexedScript("groovy", "naive_bayes_model" + modelSuffix, getNaiveBayesGroovyScript(model, featureTerms)).get();
 
         // try svm
         System.out.println("train SVM ");
@@ -133,9 +135,9 @@ class MovieReviewsClassifier implements Serializable {
         evaluate(test, svmModel);
 
         // index template search request that can be used for classification of new data
-        client.preparePutIndexedScript("mustache", "svm_model", svmSearchTemplate(svmModel, featureTerms)).get();
+        client.preparePutIndexedScript("mustache", "svm_model" + modelSuffix, svmSearchTemplate(svmModel, featureTerms)).get();
         // slow version but with parameters built in
-        client.preparePutIndexedScript("groovy", "svm_model", getSMVGroovyScript(svmModel, featureTerms)).get();
+        client.preparePutIndexedScript("groovy", "svm_model" + modelSuffix, getSMVGroovyScript(svmModel, featureTerms)).get();
     }
 
     private void evaluate(JavaRDD<LabeledPoint> test, final ClassificationModel model) {
@@ -152,7 +154,7 @@ class MovieReviewsClassifier implements Serializable {
         System.out.println("accuracy : " + accuracy);
     }
 
-    private JavaRDD<LabeledPoint> convertToLabeledPoint(JavaPairRDD<String, Map<String, Object>> esRDD) {
+    private JavaRDD<LabeledPoint> convertToLabeledPoint(JavaPairRDD<String, Map<String, Object>> esRDD, final String labelFieldName) {
         JavaRDD<LabeledPoint> corpus = esRDD.map(
                 new Function<Tuple2<String, Map<String, Object>>, LabeledPoint>() {
                     public LabeledPoint call(Tuple2<String, Map<String, Object>> dataPoint) {
@@ -174,9 +176,15 @@ class MovieReviewsClassifier implements Serializable {
                     }
 
                     private Double getLabel(Tuple2<String, Map<String, Object>> dataPoint) {
+                        //System.out.println("looking for " + labelFieldName + " in " + Arrays.toString(dataPoint._2().keySet().toArray(new String[dataPoint._2().keySet().size()])));
                         // convert string to double label
-                        String label = (String) ((ArrayList) dataPoint._2().get("label")).get(0);
-                        return label.equals("positive") ? 1.0 : 0;
+                        if (labelFieldName.equals("label")) {
+                            String label = (String) ((ArrayList) dataPoint._2().get(labelFieldName)).get(0);
+                            return label.equals("positive") ? 1.0 : 0;
+                        } else {
+                            Long label = (Long) ((ArrayList) dataPoint._2().get(labelFieldName)).get(0);
+                            return label.longValue() == 4l ? 1.0 : 0;
+                        }
                     }
                 }
         );
@@ -186,7 +194,7 @@ class MovieReviewsClassifier implements Serializable {
     }
 
     // request body for vector representation of documents
-    private String restRequestBody(String[] featureTerms) {
+    private String restRequestBody(String[] featureTerms, String labelFieldName) {
         return "{\n" +
                 "  \"script_fields\": {\n" +
                 "    \"vector\": {\n" +
@@ -200,15 +208,15 @@ class MovieReviewsClassifier implements Serializable {
                 "    }\n" +
                 "  },\n" +
                 "  \"fields\": [\n" +
-                "    \"label\"\n" +
+                "    \"" + labelFieldName + "\"\n" +
                 "  ]\n" +
                 "}";
     }
 
     //
-    private String[] getSignificantTermsAsStringList(int numTerms, SignificanceHeuristicBuilder heuristic, Client client) {
+    private String[] getSignificantTermsAsStringList(int numTerms, SignificanceHeuristicBuilder heuristic, Client client, String index, String labelFieldName) {
 
-        SearchResponse searchResponse = client.prepareSearch("movie-reviews").addAggregation(terms("classes").field("label").subAggregation(significantTerms("features").field("text").significanceHeuristic(heuristic).size(numTerms / 2))).get();
+        SearchResponse searchResponse = client.prepareSearch(index).addAggregation(terms("classes").field(labelFieldName).subAggregation(significantTerms("features").field("text").significanceHeuristic(heuristic).size(numTerms / 2))).get();
         List<Terms.Bucket> labelBucket = ((Terms) searchResponse.getAggregations().asMap().get("classes")).getBuckets();
         Collection<SignificantTerms.Bucket> significantTerms = ((SignificantStringTerms) (labelBucket.get(0).getAggregations().asMap().get("features"))).getBuckets();
         List<String> features = new ArrayList<>();
